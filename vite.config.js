@@ -9,13 +9,6 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
-    minify: 'esbuild',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['vue']
-        }
-      }
-    }
+    minify: 'esbuild'
   }
 })
