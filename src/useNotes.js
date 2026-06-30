@@ -1,129 +1,107 @@
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 
 export function useNotes() {
-  // 1. 预设颜色
-  const presetColors = ['#fff9db', '#e7f5ff', '#e3fafc', '#f3f0ff', '#f4fce3', '#fff5f5']
-  
-  // 2. 核心便签数组状态
-  const notes = ref([])
-
-  // 3. 弹窗状态管理
-  const dialog = reactive({
-    visible: false,
-    isEdit: false,
-    editingId: null,
-    clickX: 100,
-    clickY: 100,
-    formData: {
-      title: '',
-      content: '',
-      color: '#fff9db'
-    }
-  })
-
-  // 4. 拖拽状态管理
-  const dragStatus = reactive({
-    isDragging: false,
-    currentNote: null,
-    startX: 0,
-    startY: 0,
-    startLeft: 0,
-    startTop: 0
-  })
-
-  // 5. 生命周期与 LocalStorage 持久化
-  onMounted(() => {
-    const savedNotes = localStorage.getItem('v-note-wall-data')
-    if (savedNotes) {
-      notes.value = JSON.parse(savedNotes)
-    }
-  })
+  const presetColors = ['#FFF9DB', '#CDF3EA', '#D9E2FF', '#FDE5DA', '#f3e5f5']
+  const localData = localStorage.getItem('wall_notes')
+  const notes = ref(localData ? JSON.parse(localData) : [])
+  const initialMaxZIndex = notes.value.reduce((max, note) => {
+    return (note.zIndex && note.zIndex > max) ? note.zIndex : max
+  }, 1)
+  const maxZIndex = ref(initialMaxZIndex)
 
   watch(notes, (newNotes) => {
-    localStorage.setItem('v-note-wall-data', JSON.stringify(newNotes))
+    localStorage.setItem('wall_notes', JSON.stringify(newNotes))
   }, { deep: true })
 
-  // 6. 右键及弹窗事件处理
-  const handleWallContextMenu = (e) => {
-    dialog.isEdit = false
-    dialog.editingId = null
-    dialog.clickX = e.clientX
-    dialog.clickY = e.clientY
-    dialog.formData = { title: '', content: '', color: '#fff9db' }
-    dialog.visible = true
+  const dialog = ref({
+    visible: false,
+    isEdit: false,
+    formData: { id: null, title: '', content: '', color: '#fff9db', isPinned: false }
+  })
+
+  let currentDragNote = null
+  let startX = 0
+  let startY = 0
+
+  const handleWallContextMenu = () => {
+    dialog.value = {
+      visible: true,
+      isEdit: false,
+      formData: { id: null, title: '', content: '', color: presetColors[0], isPinned: false }
+    }
   }
 
   const handleNoteContextMenu = (note) => {
-    dialog.isEdit = true
-    dialog.editingId = note.id
-    dialog.formData = {
-      title: note.title,
-      content: note.content,
-      color: note.color
+    dialog.value = {
+      visible: true,
+      isEdit: true,
+      formData: { ...note }
     }
-    dialog.visible = true
   }
 
   const closeDialog = () => {
-    dialog.visible = false
+    dialog.value.visible = false
   }
 
   const saveNote = () => {
-    if (dialog.isEdit && dialog.editingId !== null) {
-      // 编辑现有便签
-      const target = notes.value.find(n => n.id === dialog.editingId)
-      if (target) {
-        target.title = dialog.formData.title
-        target.content = dialog.formData.content
-        target.color = dialog.formData.color
+    if (dialog.value.isEdit) {
+      // 编辑保存
+      const index = notes.value.findIndex(n => String(n.id) === String(dialog.value.formData.id))
+      if (index !== -1) {
+        notes.value[index] = { ...dialog.value.formData }
       }
     } else {
-      // 新建便签
-      const newNote = {
+      // 新建保存
+      maxZIndex.value += 1
+      notes.value.push({
         id: Date.now(),
-        title: dialog.formData.title,
-        content: dialog.formData.content,
-        color: dialog.formData.color,
-        x: dialog.clickX,
-        y: dialog.clickY
-      }
-      notes.value.push(newNote)
+        title: dialog.value.formData.title,
+        content: dialog.value.formData.content,
+        color: dialog.value.formData.color,
+        isPinned: false,
+        zIndex: maxZIndex.value,
+        x: Math.random() * (window.innerWidth - 250),
+        y: Math.random() * (window.innerHeight - 350)
+      })
     }
     closeDialog()
   }
 
   const deleteNote = () => {
-    if (dialog.editingId !== null) {
-      notes.value = notes.value.filter(n => n.id !== dialog.editingId)
+    if (!dialog.value.formData.id) {
+      console.warn('删除失败：未找到有效的便签 ID')
       closeDialog()
+      return
     }
+    notes.value = notes.value.filter(n => String(n.id) !== String(dialog.value.formData.id))
+    closeDialog()
   }
 
-  // 7. 鼠标拖拽逻辑
+  // 点击/拖拽提升层级
   const handleMouseDown = (e, note) => {
-    if (e.button === 2) return // 过滤右键
-    dragStatus.isDragging = true
-    dragStatus.currentNote = note
-    dragStatus.startX = e.clientX
-    dragStatus.startY = e.clientY
-    dragStatus.startLeft = note.x
-    dragStatus.startTop = note.y
+    if (e.target.classList.contains('pin-icon')) return
+    
+    // 只要触碰就提升当前 zIndex 
+    maxZIndex.value += 1
+    note.zIndex = maxZIndex.value
+
+    if (note.isPinned) return
+
+    currentDragNote = note
+    startX = e.clientX - note.x
+    startY = e.clientY - note.y
   }
 
   const handleMouseMove = (e) => {
-    if (!dragStatus.isDragging || !dragStatus.currentNote) return
-    const deltaX = e.clientX - dragStatus.startX
-    const deltaY = e.clientY - dragStatus.startY
-    dragStatus.currentNote.x = dragStatus.startLeft + deltaX
-    dragStatus.currentNote.y = dragStatus.startTop + deltaY
+    if (!currentDragNote) return
+    currentDragNote.x = e.clientX - startX
+    currentDragNote.y = e.clientY - startY
   }
 
   const handleMouseUp = () => {
-    dragStatus.isDragging = false
-    dragStatus.currentNote = null
+    currentDragNote = null
   }
 
-  // 返回给组件使用
   return {
     presetColors,
     notes,
